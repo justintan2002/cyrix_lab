@@ -1,4 +1,6 @@
-# https://github.com/github/gitignore/blob/master/C.gitignore
+
+settings/
+
 
 # Prerequisites
 *.d
