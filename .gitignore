@@ -1,6 +1,12 @@
+# Byte-compiled / optimized / DLL files for python
+__pycache__/
+*.py[cod]
 
-settings/
+# stm32 stuff
+**/.settings/*
+**/Debug/*
 
+# https://github.com/github/gitignore/blob/master/C.gitignore
 
 # Prerequisites
 *.d

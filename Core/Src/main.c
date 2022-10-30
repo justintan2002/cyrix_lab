@@ -82,27 +82,57 @@ int main(void)
 	uint32_t pressure_tick = HAL_GetTick();
 	uint32_t fluxer_tick = HAL_GetTick();
 	uint32_t sensor_send_tick = HAL_GetTick();
+	uint32_t fire_tick = HAL_GetTick();
 
 	float temp_data, humidity_data, pressure_data;
 	float accel_data[3], mag_data[3], gyro_data[3]; // [x, y, z]
 	float mag_magnitude;
 
+	float accel_th[2] = {5.0, 15.0}; //upper and lower limit
+	float gyro_th = 10; //>10 violate
+	float mag_th = 0.6; //>0.6 violate
+	float temp_th = 35; //>35 violate
+	float pressure_th[2] = {900, 1200}; // upper and lower limit
+	float humid_th = 90; //<90 violate
+
+	uint8_t violations[6] = {0,0,0,0,0,0}; // accel, gyro, mag, temp, humidity, pressure
+	uint8_t v_count = 0;
+
 	uint8_t mode = 0; //0: exploration, 1: battle
 	uint8_t warning = 0; //0: no warning, 1: warning
-	uint8_t charge_cnt = 8;
+	uint8_t charge_cnt = 0;
+
+	uart_print("Entering EXPLORATION mode\n"); //initial printing
 
 	while (1)
 	{
 		switch (check_button())
 		{
 		case 1:
-			uart_print("change mode \n");
-			if (!warning) mode ^= 1;
+			if (!warning){
+				mode ^= 1;
+				memset(violations, 0 ,6); // changing mode reset number of violations
+				uart_print((mode==0)?"Entering EXPLORATION mode\n":"Entering BATTLE mode\n");
+			}
+			else {
+				uart_print("In WARNING state, unable to change mode\n");
+			}
 			break;
 		case 2:
-			uart_print("clear warning/charging \n");
-			if (!warning && charge_cnt < 10) charge_cnt += 1;
-			else if(warning) warning = 0;
+
+			if (!warning && mode) {
+				if (charge_cnt < 10){
+					charge_cnt += 1;
+					uart_print("Battery Charged! Current Battery Level %d/10\n",charge_cnt);
+				}
+				else uart_print("Battery Full!\n");
+
+			}
+			else if(warning){
+				warning = 0;
+				memset(violations, 0 ,6); // clear warning reset number of violations
+				uart_print("Warning Cleared!\n");
+			}
 			break;
 		default:
 			break;
@@ -110,7 +140,9 @@ int main(void)
 
 		led_handler(mode, warning);
 
-		if (HAL_GetTick() - imu_tick >= 1000/imu_freq){
+
+		// poll accel, mag and gyro data if no warning
+		if (HAL_GetTick() - imu_tick >= 1000/imu_freq && !warning){
 			int16_t mag_data_i16[3] = { 0 };
 			BSP_MAGNETO_GetXYZ(mag_data_i16);
 			mag_data[0] = (float)mag_data_i16[0]/6842;
@@ -129,21 +161,89 @@ int main(void)
 			BSP_GYRO_GetXYZ(gyro_data);
 			for (int i=0; i<3; i++)
 				gyro_data[i] /= 1000; //convert from mdps to dps
+
+			// check if accel data violated threshold
+			if (accel_data[2] < accel_th[0] || accel_data[2] > accel_th[1]){
+				violations[0] = 1;
+				uart_print("A:%.2f m/s2 violated threshold\n", accel_data[2]);
+			}
+
+			// check if gyro data violated threshold
+			if (gyro_data[2] > gyro_th) {
+				violations[1] = 1;
+				uart_print("G:%.2f dps violated threshold\n", gyro_data[2]);
+			}
+
+			// check if magnetometer violated threshold
+			if (mag_magnitude > mag_th){
+				violations[2] = 1;
+				uart_print("M:%.3f gauss violated threshold\n", mag_magnitude);
+			}
+
 		}
 
-		if (HAL_GetTick() - tnh_tick >= 1000/tnh_freq){
+		// poll humidity and temp if no warning
+		if (HAL_GetTick() - tnh_tick >= 1000/tnh_freq && !warning){
 			temp_data = BSP_TSENSOR_ReadTemp();			// read temperature sensor
 			humidity_data = BSP_HSENSOR_ReadHumidity();
 			tnh_tick = HAL_GetTick();
+
+			// check if temp violate threshold
+			if (temp_data > temp_th){
+				violations[3] = 1;
+				uart_print("T:%.2f C violated threshold\n", temp_data);
+			}
+
+			// check if humidity violated threshold
+			if (humidity_data < humid_th){
+				violations[4] = 1;
+				uart_print("H:%.2f %%rH violated threshold\n", humidity_data);
+			}
 		}
 
-		if (HAL_GetTick() - pressure_tick >= 1000/pressure_freq){
+		// poll pressure if no warning
+		if (HAL_GetTick() - pressure_tick >= 1000/pressure_freq && !warning){
 			pressure_data = BSP_PSENSOR_ReadPressure();
 			pressure_tick = HAL_GetTick();
+
+			// check if pressure violated threshold
+			if (pressure_data < pressure_th[0] || pressure_data > pressure_th[1]){
+				violations[5] = 1;
+				uart_print("P:%.2f hPa violated threshold. Number of Violations: %d\n", pressure_data, violations);
+			}
 		}
 
-		if (HAL_GetTick() - sensor_send_tick >= 1000/sensor_send_freq){
+		// count number of sensors violated
+		v_count = 0;
+		for (int i=0; i<6; i++){
+			if (violations[i] == 1) v_count += 1;
+		}
+
+		// enter warning mode when sensor threshold exceeded
+		if ((mode == 0 && v_count >= 2) || (mode==1 && v_count >= 1)){
+			warning = 1;
+		}
+
+		// Battle mode will still fire in SOS state
+		if (mode && HAL_GetTick() - fire_tick >= 5000) {
+			if (charge_cnt < 2) uart_print("NO BATTERY TO FIRE, PLEASE RECHARGE\n");
+			else {
+				charge_cnt -= 2;
+				uart_print("Fluxer Fired! Current Battery Level: %d/10\n",charge_cnt);
+			}
+			fire_tick = HAL_GetTick();
+		}
+
+		// send telemetry if no warning
+		if (HAL_GetTick() - sensor_send_tick >= 1000/sensor_send_freq && !warning){
 			uart_print("T:%.2f C, P:%.2f hPa, H:%.2f %%rH, A:%.2f m/s2, G:%.2f dps, M:%.3f gauss\r\n", temp_data, pressure_data, humidity_data, accel_data[2], gyro_data[2], mag_magnitude);
+			if (mode) uart_print("Battery: %d/10\n",charge_cnt); // if in Battle Mode, send battery level
+			sensor_send_tick = HAL_GetTick();
+		}
+
+		// send warning message
+		if (HAL_GetTick() - sensor_send_tick >= 1000 && warning){
+			uart_print(mode == 0?"WARNING mode: SOS\n":"BATTLE mode: SOS\n");
 			sensor_send_tick = HAL_GetTick();
 		}
 	}
