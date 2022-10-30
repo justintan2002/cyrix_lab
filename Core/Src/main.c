@@ -32,6 +32,7 @@ void SystemClock_Config(void);
 void change_mode(void);
 void led_handler(uint8_t mode, uint8_t warning);
 void uart_print(const char* format, ...);
+uint8_t violations_count(uint8_t arr[], uint8_t *warning, uint8_t *mode);
 
 uint32_t t1 = 0, t2 = 0;
 uint32_t led_tick  = 0;
@@ -79,8 +80,7 @@ int main(void)
 
 	uint32_t imu_tick = HAL_GetTick();
 	uint32_t tnh_tick = HAL_GetTick();
-	uint32_t pressure_tick = HAL_GetTick();
-	uint32_t fluxer_tick = HAL_GetTick();
+	uint32_t pressure_tick = HAL_GetTick();;
 	uint32_t sensor_send_tick = HAL_GetTick();
 	uint32_t fire_tick = HAL_GetTick();
 
@@ -166,18 +166,24 @@ int main(void)
 			if (accel_data[2] < accel_th[0] || accel_data[2] > accel_th[1]){
 				violations[0] = 1;
 				uart_print("A:%.2f m/s2 violated threshold\n", accel_data[2]);
+				v_count = violations_count(violations, &warning, &mode); //count number of violations and update mode accordingly
+				uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// check if gyro data violated threshold
 			if (gyro_data[2] > gyro_th) {
 				violations[1] = 1;
 				uart_print("G:%.2f dps violated threshold\n", gyro_data[2]);
+				v_count = violations_count(violations, &warning, &mode); //count number of violations and update mode accordingly
+				uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// check if magnetometer violated threshold
 			if (mag_magnitude > mag_th){
 				violations[2] = 1;
 				uart_print("M:%.3f gauss violated threshold\n", mag_magnitude);
+				v_count = violations_count(violations, &warning, &mode); //count number of violations and update mode accordingly
+				uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 		}
@@ -192,12 +198,16 @@ int main(void)
 			if (temp_data > temp_th){
 				violations[3] = 1;
 				uart_print("T:%.2f C violated threshold\n", temp_data);
+				v_count = violations_count(violations, &warning, &mode); //count number of violations and update mode accordingly
+				uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// check if humidity violated threshold
 			if (humidity_data < humid_th){
 				violations[4] = 1;
 				uart_print("H:%.2f %%rH violated threshold\n", humidity_data);
+				v_count = violations_count(violations, &warning, &mode); //count number of violations and update mode accordingly
+				uart_print("%d sensors violated threshold\n", v_count);
 			}
 		}
 
@@ -210,18 +220,9 @@ int main(void)
 			if (pressure_data < pressure_th[0] || pressure_data > pressure_th[1]){
 				violations[5] = 1;
 				uart_print("P:%.2f hPa violated threshold. Number of Violations: %d\n", pressure_data, violations);
+				v_count = violations_count(violations, &warning, &mode); //count number of violations and update mode accordingly
+				uart_print("%d sensors violated threshold\n", v_count);
 			}
-		}
-
-		// count number of sensors violated
-		v_count = 0;
-		for (int i=0; i<6; i++){
-			if (violations[i] == 1) v_count += 1;
-		}
-
-		// enter warning mode when sensor threshold exceeded
-		if ((mode == 0 && v_count >= 2) || (mode==1 && v_count >= 1)){
-			warning = 1;
 		}
 
 		// Battle mode will still fire in SOS state
@@ -292,6 +293,17 @@ int check_button(){
 	else{
 		return 0;
 	}
+}
+
+uint8_t violations_count(uint8_t arr[], uint8_t *warning, uint8_t *mode){
+	uint8_t v_count = 0;
+	for (int i=0; i<6; i++){
+		if (arr[i] == 1) v_count += 1;
+	}
+	if ((*mode == 0 && v_count >= 2) || (*mode==1 && v_count >= 1)){
+		*warning = 1;
+	}
+	return v_count;
 }
 
 void led_handler(uint8_t mode, uint8_t warning){
