@@ -17,6 +17,7 @@
 
 #include "stdio.h"
 #include "stdarg.h"
+#include "math.h"
 
 #define fluxer_firing_rate (int)5000
 #define imu_freq (int)40
@@ -49,7 +50,7 @@ HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 int main(void)
 {
-	initialise_monitor_handles(); // for semi-hosting support (printf)
+ 	initialise_monitor_handles(); // for semi-hosting support (printf)
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 	HAL_Init();
@@ -84,6 +85,7 @@ int main(void)
 
 	float temp_data, humidity_data, pressure_data;
 	float accel_data[3], mag_data[3], gyro_data[3]; // [x, y, z]
+	float mag_magnitude;
 
 	uint8_t mode = 0; //0: exploration, 1: battle
 	uint8_t warning = 0; //0: no warning, 1: warning
@@ -115,6 +117,8 @@ int main(void)
 			mag_data[1] = (float)mag_data_i16[1]/6842;
 			mag_data[2] = (float)mag_data_i16[2]/6842;
 
+			mag_magnitude = (float) sqrt(pow(mag_data[0], 2) + pow(mag_data[1], 2) + pow(mag_data[2], 2));
+
 			int16_t accel_data_i16[3] = { 0 };			// array to store the x, y and z readings.
 			BSP_ACCELERO_AccGetXYZ(accel_data_i16);		// read accelerometer
 			// the function above returns 16 bit integers which are 100 * acceleration_in_m/s2. Converting to float to print the actual acceleration.
@@ -123,6 +127,8 @@ int main(void)
 			accel_data[2] = (float)accel_data_i16[2] / 100.0f;
 
 			BSP_GYRO_GetXYZ(gyro_data);
+			for (int i=0; i<3; i++)
+				gyro_data[i] /= 1000; //convert from mdps to dps
 		}
 
 		if (HAL_GetTick() - tnh_tick >= 1000/tnh_freq){
@@ -137,7 +143,8 @@ int main(void)
 		}
 
 		if (HAL_GetTick() - sensor_send_tick >= 1000/sensor_send_freq){
-			uart_print("T:%f C, P:%f hPa, H:%f \%rH, A:%f m/s2, G:%f dps, M:%f gauss\r\n", temp_data, pressure_data, humidity_data, accel_data[2], gyro_data[0], mag_data[0]);
+			uart_print("T:%.2f C, P:%.2f hPa, H:%.2f %%rH, A:%.2f m/s2, G:%.2f dps, M:%.3f gauss\r\n", temp_data, pressure_data, humidity_data, accel_data[2], gyro_data[2], mag_magnitude);
+			sensor_send_tick = HAL_GetTick();
 		}
 	}
 
@@ -217,5 +224,4 @@ void uart_print(const char* format, ...){
 	vsprintf(msg_print, format, args);
 	va_end(args);
 	HAL_UART_Transmit(&huart1, (uint8_t*)msg_print, strlen(msg_print),0xFFFF); //Sending in normal mode
-
 }
