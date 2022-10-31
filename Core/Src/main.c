@@ -19,6 +19,7 @@
 #include "stdio.h"
 #include "stdarg.h"
 #include "math.h"
+#include "string.h"
 
 #define fluxer_firing_rate (int)5000
 #define imu_freq (int)40
@@ -29,6 +30,7 @@
 extern void initialise_monitor_handles(void);	// for semi-hosting support (printf)
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
+static void UART_Init(void);
 
 
 int check_button(void);
@@ -39,15 +41,17 @@ void uart_print(const char* format, ...);
 
 I2C_HandleTypeDef hi2c1;
 uint8_t violations_count(uint8_t arr[], uint8_t *warning, uint8_t mode);
+uint8_t read_cnt = 0;
 
 uint32_t t1 = 0, t2 = 0;
 uint32_t led_tick  = 0;
+
+char uart_buffer[1024];
 
 UART_HandleTypeDef huart1;
 uint8_t nfcCount = 0;
 
 extern void NFC_IO_Init(uint8_t GpoIrqEnable);
-
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
@@ -62,35 +66,36 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
 }
 
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+	if(huart == &huart1){
+		read_cnt+=1;
+	}
+}
+
 int main(void)
 {
- 	initialise_monitor_handles(); // for semi-hosting support (printf)
+	uint8_t accel_init = 1;
+	uint8_t gyro_init = 1;
+	uint8_t magneto_init = 1;
+	uint8_t temp_init = 1;
+	uint8_t humid_init = 1;
+	uint8_t pressure_init = 1;
+
+	initialise_monitor_handles(); // for semi-hosting support (printf)
 
 	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
 	HAL_Init();
 	MX_GPIO_Init();
 	NFC_IO_Init(1);
-
-	huart1.Instance = USART1;
-	huart1.Init.BaudRate = 115200;
-	huart1.Init.WordLength = UART_WORDLENGTH_8B;
-	huart1.Init.StopBits = UART_STOPBITS_1;
-	huart1.Init.Parity = UART_PARITY_NONE;
-	huart1.Init.Mode = UART_MODE_TX_RX;
-	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-	huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-	huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-
-	BSP_COM_Init(COM1, &huart1);
+	UART_Init();
 
 	/* Peripheral initializations using BSP functions */
-	BSP_ACCELERO_Init(); //ODR: 52Hz
-	BSP_GYRO_Init(); //ODR: 52Hz
-	BSP_MAGNETO_Init(); //ODR: 40Hz
-	BSP_TSENSOR_Init(); //ODR: 1Hz
-	BSP_HSENSOR_Init(); //ODR: 1Hz
-	BSP_PSENSOR_Init(); //ODR: 25Hz
+	accel_init = BSP_ACCELERO_Init(); //ODR: 52Hz
+	gyro_init = BSP_GYRO_Init(); //ODR: 52Hz
+	magneto_init = BSP_MAGNETO_Init(); //ODR: 40Hz
+	temp_init = BSP_TSENSOR_Init(); //ODR: 1Hz
+	humid_init = BSP_HSENSOR_Init(); //ODR: 1Hz
+	pressure_init = BSP_PSENSOR_Init(); //ODR: 25Hz
 
 	MX_I2C1_Init(); // Initialise I2C
 
@@ -101,9 +106,10 @@ int main(void)
 	uint32_t fire_tick = HAL_GetTick();
 	uint32_t light_tick;
 
-	float temp_data, humidity_data, pressure_data;
-	float accel_data[3], mag_data[3], gyro_data[3]; // [x, y, z]
-	float mag_magnitude;
+	float temp_data=0, humidity_data=0, pressure_data=0;
+	float accel_data[3]={1}, mag_data[3] = {0}, gyro_data[3] = {20}; // [x, y, z]
+	float mag_magnitude=0;
+	float gyro_offset[3] = {0.49, -3.15, 0.14};
 
 	float accel_th[2] = {5.0, 15.0}; //upper and lower limit
 	float gyro_th = 10; //>10 violate
@@ -114,19 +120,47 @@ int main(void)
 
 	uint8_t violations[6] = {0,0,0,0,0,0}; // accel, gyro, mag, temp, humidity, pressure
 	uint8_t v_count = 0;
-
 	uint8_t mode = 0; //0: exploration, 1: battle
 	uint8_t warning = 0; //0: no warning, 1: warning
 	uint8_t charge_cnt = 0; // number of battery
 	uint8_t fired = 0; // counter for LED
-	
-	uart_print("Entering EXPLORATION mode\n"); //initial printing
+	char str[5] = {'\0'}; //uart read buffer
+	uint8_t auth_state = 0;
 
 	while (1)
 	{
+		if(accel_init) accel_init = BSP_ACCELERO_Init();
+		if(gyro_init) gyro_init = BSP_GYRO_Init();
+		if(magneto_init) magneto_init = BSP_MAGNETO_Init();
+		if(temp_init) temp_init = BSP_TSENSOR_Init();
+		if(humid_init) humid_init = BSP_HSENSOR_Init();
+		if(pressure_init) pressure_init = BSP_PSENSOR_Init();
+		uart_receive(str);
+		if (read_cnt > 0){
+			if (str[0] == '0' && charge_cnt < 10){
+				charge_cnt += 1;
+				uart_print("Battery Charged! Current Battery Level %d/10\n",charge_cnt);
+			}
+			else if(str[0]=='1'){
+				mode ^= 1;
+				memset(violations, 0 ,6);
+				uart_print((mode==0)?"Entering EXPLORATION mode\n":"Entering BATTLE mode\n");
+			}
+			else if(str[0] == '5'){
+				auth_state = 1;
+			}
+			read_cnt -= 1;
+		}
+		if (!auth_state && nfcCount > 0){
+			uart_print("Auth: 12345\n");
+			nfcCount = 0;
+			uart_print("Entering EXPLORATION mode\n"); //initial printing
+		}
+		if (!auth_state) continue;
+
 		switch (check_button())
 		{
-		case 1:
+		case 2:
 			if (!warning){
 				mode ^= 1;
 				memset(violations, 0 ,6); // changing mode reset number of violations
@@ -136,11 +170,12 @@ int main(void)
 				uart_print("In WARNING state, unable to change mode\n");
 			}
 			break;
-		case 2:
+		case 1:
 
 			if (!warning && mode) {
 				if (charge_cnt < 10){
 					charge_cnt += 1;
+					memset(violations, 0 ,6);
 					uart_print("Battery Charged! Current Battery Level %d/10\n",charge_cnt);
 				}
 				else uart_print("Battery Full!\n");
@@ -159,10 +194,6 @@ int main(void)
 		led_handler(mode, warning);
 
 		// if NFC detected send log in message
-		if (nfcCount > 0){
-			uart_print("Auth: 12345\n");
-			nfcCount = 0;
-		}
 
 		// poll accel, mag and gyro data if no warning
 		if (HAL_GetTick() - imu_tick >= 1000/imu_freq && !warning){
@@ -178,23 +209,25 @@ int main(void)
 
 			// get gyro data
 			BSP_GYRO_GetXYZ(gyro_data);
-			for (int i=0; i<3; i++)
+			for (int i=0; i<3; i++){
 				gyro_data[i] /= 1000; //convert from mdps to dps
+				gyro_data[i] -= gyro_offset[i];
+			}
 
 			// check if gyro data violated threshold
 			if (gyro_data[2] > gyro_th) {
 				violations[1] = 1;
-				uart_print("G:%.2f dps violated threshold\n", gyro_data[2]);
+				//uart_print("G:%.2f dps violated threshold\n", gyro_data[2]);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				uart_print("%d sensors violated threshold\n", v_count);
+				//uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// check if magnetometer violated threshold
 			if (mag_magnitude > mag_th){
 				violations[2] = 1;
-				uart_print("M:%.3f gauss violated threshold\n", mag_magnitude);
+				//uart_print("M:%.3f gauss violated threshold\n", mag_magnitude);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				uart_print("%d sensors violated threshold\n", v_count);
+				//uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// if battle mode
@@ -210,9 +243,9 @@ int main(void)
 				// check if accel data violated threshold
 				if (accel_data[2] < accel_th[0] || accel_data[2] > accel_th[1]){
 					violations[0] = 1;
-					uart_print("A:%.2f m/s2 violated threshold\n", accel_data[2]);
+					//uart_print("A:%.2f m/s2 violated threshold\n", accel_data[2]);
 					v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-					uart_print("%d sensors violated threshold\n", v_count);
+					//uart_print("%d sensors violated threshold\n", v_count);
 				}
 			}
 
@@ -227,9 +260,9 @@ int main(void)
 			// check if humidity violated threshold
 			if (humidity_data < humid_th){
 				violations[4] = 1;
-				uart_print("H:%.2f %%rH violated threshold\n", humidity_data);
+				//uart_print("H:%.2f %%rH violated threshold\n", humidity_data);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				uart_print("%d sensors violated threshold\n", v_count);
+				//uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// if battle mode
@@ -240,9 +273,9 @@ int main(void)
 				// check if temp violate threshold
 				if (temp_data > temp_th){
 					violations[3] = 1;
-					uart_print("T:%.2f C violated threshold\n", temp_data);
+					//uart_print("T:%.2f C violated threshold\n", temp_data);
 					v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-					uart_print("%d sensors violated threshold\n", v_count);
+					//uart_print("%d sensors violated threshold\n", v_count);
 				}
 
 			}
@@ -256,9 +289,9 @@ int main(void)
 			// check if pressure violated threshold
 			if (pressure_data < pressure_th[0] || pressure_data > pressure_th[1]){
 				violations[5] = 1;
-				uart_print("P:%.2f hPa violated threshold. Number of Violations: %d\n", pressure_data, violations);
+				//uart_print("P:%.2f hPa violated threshold. Number of Violations: %d\n", pressure_data, violations);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				uart_print("%d sensors violated threshold\n", v_count);
+				//uart_print("%d sensors violated threshold\n", v_count);
 			}
 		}
 
@@ -293,10 +326,10 @@ int main(void)
 		// send telemetry if no warning
 		if (HAL_GetTick() - sensor_send_tick >= 1000/sensor_send_freq && !warning){
 			if (mode) { //print battle mode stuff
-				uart_print("P:%.2f hPa, H:%.2f %%rH, G:%.2f dps, M:%.3f gauss T:%.2f C, A:%.2f m/s2\r\n",pressure_data, humidity_data, gyro_data[2], mag_magnitude, temp_data, accel_data[2]);
+				uart_print("Info P: %.2f hPa, H: %.2f %%rH, G: %.2f dps, M: %.3f gauss T: %.2f C, A: %.2f m/s2\r\n",pressure_data, humidity_data, gyro_data[2], mag_magnitude, temp_data, accel_data[2]);
 				uart_print("Battery: %d/10\n",charge_cnt); // if in Battle Mode, send battery level
 			} else { // print exploration mode stuff
-				uart_print("P:%.2f hPa, H:%.2f %%rH, G:%.2f dps, M:%.3f gauss\r\n", pressure_data, humidity_data, gyro_data[2], mag_magnitude);
+				uart_print("Info P: %.2f hPa, H: %.2f %%rH, G: %.2f dps, M: %.3f gauss\r\n", pressure_data, humidity_data, gyro_data[2], mag_magnitude);
 			}
 			sensor_send_tick = HAL_GetTick();
 		}
@@ -310,44 +343,17 @@ int main(void)
 
 }
 
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LED2_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin LED2_Pin */
-  GPIO_InitStruct.Pin = LED2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  GPIO_InitStruct.Pin = BUTTON_EXTI13_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-	// Enable NVIC EXTI line 13
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-}
-
 int check_button(){
 	if (t2 == 0) return 0;
 	else if(HAL_GetTick() - t2 > 1000){
 		t1 = 0;
 		t2 = 0;
-		return 2;
+		return 1;
 	}
 	else if(t2 - t1 <= 1000 && t1 != 0){
 		t1 = 0;
 		t2 = 0;
-		return 1;
+		return 2;
 	}
 	else{
 		return 0;
@@ -389,12 +395,70 @@ void led_handler(uint8_t mode, uint8_t warning){
 }
 
 void uart_print(const char* format, ...){
-	char msg_print[256];
+	char msg_print[256] = {'\0'};
 	va_list args;
 	va_start(args, format);
-	vsprintf(msg_print, format, args);
+	vsnprintf(msg_print, 256, format, args);
 	va_end(args);
-	HAL_UART_Transmit(&huart1, (uint8_t*)msg_print, strlen(msg_print),0xFFFF); //Sending in normal mode
+	HAL_UART_Transmit(&huart1, (uint8_t*) msg_print, strlen(msg_print), 0xFFFF); //Sending in normal mode
+}
+
+uart_receive(char* str_uart){
+	return HAL_UART_Receive_IT(&huart1, (uint8_t*) str_uart, 5);
+}
+
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+
+static void MX_GPIO_Init(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, LED2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin LED2_Pin */
+  GPIO_InitStruct.Pin = LED2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = BUTTON_EXTI13_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	// Enable NVIC EXTI line 13
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+}
+
+static void UART_Init(void)
+{
+	huart1.Instance = USART1;
+	huart1.Init.BaudRate = 115200;
+	huart1.Init.WordLength = UART_WORDLENGTH_8B;
+	huart1.Init.StopBits = UART_STOPBITS_1;
+	huart1.Init.Parity = UART_PARITY_NONE;
+	huart1.Init.Mode = UART_MODE_TX_RX;
+	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+	huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+	huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+	BSP_COM_Init(COM1, &huart1);
 }
 
 static void MX_I2C1_Init(void)

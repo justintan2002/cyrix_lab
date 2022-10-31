@@ -57,6 +57,8 @@
 
 /* External variables --------------------------------------------------------*/
 
+extern UART_HandleTypeDef huart1;
+
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -218,6 +220,21 @@ void EXTI4_IRQHandler(void)
 {
 	HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_4);
 }
+
+/**
+  * @brief This function handles USART1 global interrupt.
+  */
+void USART1_IRQHandler(void)
+{
+/* USER CODE BEGIN USART1_IRQn 0 */
+/* USER CODE END USART1_IRQn 0 */
+HAL_UART_IRQHandler(&huart1);
+/* USER CODE BEGIN USART1_IRQn 1 */
+/* USER CODE END USART1_IRQn 1 */
+}
+/**
+* @brief This function handles EXTI line[15:10] interrupts.
+  */
 
 /**
   * @brief This function handles EXTI line[15:10] interrupts.
