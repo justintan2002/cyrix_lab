@@ -1,12 +1,9 @@
-from email.base64mime import decode
 from PySide6.QtWidgets import *
 from PySide6.QtGui import *
 from PySide6.QtCore import *
 from PySide6.QtSerialPort import *
 import sys
 import re
-
-from matplotlib.table import Table
 
 class Login_Page(QWidget):
     def __init__(self):
@@ -286,7 +283,7 @@ class Serial_Interface(QObject):
                 [data_float.append(float(f)) for f in data_str]
                 if len(data_float) == 6 or len(data_float) == 4:
                     self.info_signal.emit(data_float)
-            elif "Battery:" in decoded_msg:
+            elif "Battery" in decoded_msg:
                 charge = re.findall(r"\b\d+?[/]", decoded_msg)
                 charge_int = int(charge[0][0:-1])
                 self.charge_signal.emit(charge_int)
