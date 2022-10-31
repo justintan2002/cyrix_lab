@@ -21,11 +21,11 @@
 #include "math.h"
 #include "string.h"
 
-#define fluxer_firing_rate (int)5000
-#define imu_freq (int)40
-#define tnh_freq (int) 1
-#define pressure_freq (int) 20
-#define sensor_send_freq (int) 1
+#define fluxer_firing_rate (int)1 //max 5000
+#define imu_freq (int)1 // max 40
+#define tnh_freq (int) 1 // max 1
+#define pressure_freq (int) 1 // max 20
+#define sensor_send_freq (int) 1 // max 1
 
 extern void initialise_monitor_handles(void);	// for semi-hosting support (printf)
 static void MX_GPIO_Init(void);
@@ -217,17 +217,13 @@ int main(void)
 			// check if gyro data violated threshold
 			if (gyro_data[2] > gyro_th) {
 				violations[1] = 1;
-				//uart_print("G:%.2f dps violated threshold\n", gyro_data[2]);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				//uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// check if magnetometer violated threshold
 			if (mag_magnitude > mag_th){
 				violations[2] = 1;
-				//uart_print("M:%.3f gauss violated threshold\n", mag_magnitude);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				//uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// if battle mode
@@ -243,9 +239,7 @@ int main(void)
 				// check if accel data violated threshold
 				if (accel_data[2] < accel_th[0] || accel_data[2] > accel_th[1]){
 					violations[0] = 1;
-					//uart_print("A:%.2f m/s2 violated threshold\n", accel_data[2]);
 					v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-					//uart_print("%d sensors violated threshold\n", v_count);
 				}
 			}
 
@@ -260,9 +254,7 @@ int main(void)
 			// check if humidity violated threshold
 			if (humidity_data < humid_th){
 				violations[4] = 1;
-				//uart_print("H:%.2f %%rH violated threshold\n", humidity_data);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				//uart_print("%d sensors violated threshold\n", v_count);
 			}
 
 			// if battle mode
@@ -273,9 +265,7 @@ int main(void)
 				// check if temp violate threshold
 				if (temp_data > temp_th){
 					violations[3] = 1;
-					//uart_print("T:%.2f C violated threshold\n", temp_data);
 					v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-					//uart_print("%d sensors violated threshold\n", v_count);
 				}
 
 			}
@@ -289,9 +279,7 @@ int main(void)
 			// check if pressure violated threshold
 			if (pressure_data < pressure_th[0] || pressure_data > pressure_th[1]){
 				violations[5] = 1;
-				//uart_print("P:%.2f hPa violated threshold. Number of Violations: %d\n", pressure_data, violations);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				//uart_print("%d sensors violated threshold\n", v_count);
 			}
 		}
 
