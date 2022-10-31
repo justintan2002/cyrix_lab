@@ -39,7 +39,6 @@ __pycache__/
 *.dylib
 
 # Executables
-*.exe
 *.out
 *.app
 *.i*86
