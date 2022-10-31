@@ -102,7 +102,7 @@ int main(void)
 	float mag_th = 0.6; //>0.6 violate
 	float temp_th = 35; //>35 violate
 	float pressure_th[2] = {900, 1200}; // upper and lower limit
-	float humid_th = 90; //<90 violate
+	float humid_th = 87; //<87 violate
 
 	uint8_t violations[6] = {0,0,0,0,0,0}; // accel, gyro, mag, temp, humidity, pressure
 	uint8_t v_count = 0;
@@ -149,6 +149,7 @@ int main(void)
 
 		led_handler(mode, warning);
 
+		// if NFC detected send log in message
 		if (nfcCount > 0){
 			uart_print("Auth: 12345\n");
 			nfcCount = 0;
@@ -156,32 +157,20 @@ int main(void)
 
 		// poll accel, mag and gyro data if no warning
 		if (HAL_GetTick() - imu_tick >= 1000/imu_freq && !warning){
+			// get magnometer data
 			int16_t mag_data_i16[3] = { 0 };
 			BSP_MAGNETO_GetXYZ(mag_data_i16);
 			mag_data[0] = (float)mag_data_i16[0]/6842;
 			mag_data[1] = (float)mag_data_i16[1]/6842;
 			mag_data[2] = (float)mag_data_i16[2]/6842;
 
+			// calculate mag magnitude
 			mag_magnitude = (float) sqrt(pow(mag_data[0], 2) + pow(mag_data[1], 2) + pow(mag_data[2], 2));
 
-			int16_t accel_data_i16[3] = { 0 };			// array to store the x, y and z readings.
-			BSP_ACCELERO_AccGetXYZ(accel_data_i16);		// read accelerometer
-			// the function above returns 16 bit integers which are 100 * acceleration_in_m/s2. Converting to float to print the actual acceleration.
-			accel_data[0] = (float)accel_data_i16[0] / 100.0f;
-			accel_data[1] = (float)accel_data_i16[1] / 100.0f;
-			accel_data[2] = (float)accel_data_i16[2] / 100.0f;
-
+			// get gyro data
 			BSP_GYRO_GetXYZ(gyro_data);
 			for (int i=0; i<3; i++)
 				gyro_data[i] /= 1000; //convert from mdps to dps
-
-			// check if accel data violated threshold
-			if (accel_data[2] < accel_th[0] || accel_data[2] > accel_th[1]){
-				violations[0] = 1;
-				uart_print("A:%.2f m/s2 violated threshold\n", accel_data[2]);
-				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				uart_print("%d sensors violated threshold\n", v_count);
-			}
 
 			// check if gyro data violated threshold
 			if (gyro_data[2] > gyro_th) {
@@ -199,21 +188,32 @@ int main(void)
 				uart_print("%d sensors violated threshold\n", v_count);
 			}
 
+			// if battle mode
+			if (mode){
+				// read data from accelerometer
+				int16_t accel_data_i16[3] = { 0 };			// array to store the x, y and z readings.
+				BSP_ACCELERO_AccGetXYZ(accel_data_i16);		// read accelerometer
+				// the function above returns 16 bit integers which are 100 * acceleration_in_m/s2. Converting to float to print the actual acceleration.
+				accel_data[0] = (float)accel_data_i16[0] / 100.0f;
+				accel_data[1] = (float)accel_data_i16[1] / 100.0f;
+				accel_data[2] = (float)accel_data_i16[2] / 100.0f;
+
+				// check if accel data violated threshold
+				if (accel_data[2] < accel_th[0] || accel_data[2] > accel_th[1]){
+					violations[0] = 1;
+					uart_print("A:%.2f m/s2 violated threshold\n", accel_data[2]);
+					v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
+					uart_print("%d sensors violated threshold\n", v_count);
+				}
+			}
+
 		}
 
 		// poll humidity and temp if no warning
 		if (HAL_GetTick() - tnh_tick >= 1000/tnh_freq && !warning){
-			temp_data = BSP_TSENSOR_ReadTemp();			// read temperature sensor
+			// get humidity data
 			humidity_data = BSP_HSENSOR_ReadHumidity();
 			tnh_tick = HAL_GetTick();
-
-			// check if temp violate threshold
-			if (temp_data > temp_th){
-				violations[3] = 1;
-				uart_print("T:%.2f C violated threshold\n", temp_data);
-				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
-				uart_print("%d sensors violated threshold\n", v_count);
-			}
 
 			// check if humidity violated threshold
 			if (humidity_data < humid_th){
@@ -221,6 +221,21 @@ int main(void)
 				uart_print("H:%.2f %%rH violated threshold\n", humidity_data);
 				v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
 				uart_print("%d sensors violated threshold\n", v_count);
+			}
+
+			// if battle mode
+			if (mode) {
+				// get temp data
+				temp_data = BSP_TSENSOR_ReadTemp();
+
+				// check if temp violate threshold
+				if (temp_data > temp_th){
+					violations[3] = 1;
+					uart_print("T:%.2f C violated threshold\n", temp_data);
+					v_count = violations_count(violations, &warning, mode); //count number of violations and update mode accordingly
+					uart_print("%d sensors violated threshold\n", v_count);
+				}
+
 			}
 		}
 
@@ -250,8 +265,12 @@ int main(void)
 
 		// send telemetry if no warning
 		if (HAL_GetTick() - sensor_send_tick >= 1000/sensor_send_freq && !warning){
-			uart_print("T:%.2f C, P:%.2f hPa, H:%.2f %%rH, A:%.2f m/s2, G:%.2f dps, M:%.3f gauss\r\n", temp_data, pressure_data, humidity_data, accel_data[2], gyro_data[2], mag_magnitude);
-			if (mode) uart_print("Battery: %d/10\n",charge_cnt); // if in Battle Mode, send battery level
+			if (mode) { //print battle mode stuff
+				uart_print("P:%.2f hPa, H:%.2f %%rH, G:%.2f dps, M:%.3f gauss T:%.2f C, A:%.2f m/s2\r\n",pressure_data, humidity_data, gyro_data[2], mag_magnitude, temp_data, accel_data[2]);
+				uart_print("Battery: %d/10\n",charge_cnt); // if in Battle Mode, send battery level
+			} else { // print exploration mode stuff
+				uart_print("P:%.2f hPa, H:%.2f %%rH, G:%.2f dps, M:%.3f gauss\r\n", pressure_data, humidity_data, gyro_data[2], mag_magnitude);
+			}
 			sensor_send_tick = HAL_GetTick();
 		}
 
