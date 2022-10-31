@@ -47,6 +47,11 @@ HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		t1 = t2;
 		t2 = HAL_GetTick();
 	}
+
+	if (GPIO_Pin == NFC_GPIO_GPO_PIN)
+	{
+		uart_print("NFC Interrupt");
+	}
 }
 
 int main(void)
@@ -77,6 +82,8 @@ int main(void)
 	BSP_TSENSOR_Init(); //ODR: 1Hz
 	BSP_HSENSOR_Init(); //ODR: 1Hz
 	BSP_PSENSOR_Init(); //ODR: 25Hz
+
+	NFC_IO_Init(1);
 
 	uint32_t imu_tick = HAL_GetTick();
 	uint32_t tnh_tick = HAL_GetTick();
@@ -139,6 +146,23 @@ int main(void)
 		}
 
 		led_handler(mode, warning);
+
+		/* NFC Part
+		uint16_t ready = NFC_IO_IsDeviceReady (M24SR_I2C_ADDR, 1);
+		uart_print("NFC Ready outcome: %d\n",ready);
+		uint16_t Length = 246;
+		uint8_t rBuf[246];
+		uint16_t NFCread = NFC_IO_ReadMultiple (M24SR_I2C_ADDR, rBuf,Length);
+
+		if (NFCread == NFC_I2C_STATUS_SUCCESS){
+			uart_print("NFC Read outcome: %d\n",NFCread);
+			for (int i=0; i<246; i++){
+				uart_print("%d ", rBuf[i]);
+				rBuf[i] = 0;
+			}
+			uart_print("\n");
+		}
+		*/
 
 
 		// poll accel, mag and gyro data if no warning
