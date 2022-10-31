@@ -87,10 +87,18 @@ static uint32_t DFSDM1_Init = 0;
 void HAL_DFSDM_ChannelMspInit(DFSDM_Channel_HandleTypeDef* hdfsdm_channel)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
   if(DFSDM1_Init == 0)
   {
   /* USER CODE BEGIN DFSDM1_MspInit 0 */
+	  /** Initializes the peripherals clock
 
+	PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_DFSDM1;
+	PeriphClkInit.Dfsdm1ClockSelection = RCC_DFSDM1CLKSOURCE_PCLK;
+	if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+	{
+	  //Error_Handler();
+	}
   /* USER CODE END DFSDM1_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_DFSDM1_CLK_ENABLE();
@@ -110,6 +118,7 @@ void HAL_DFSDM_ChannelMspInit(DFSDM_Channel_HandleTypeDef* hdfsdm_channel)
   /* USER CODE BEGIN DFSDM1_MspInit 1 */
 
   /* USER CODE END DFSDM1_MspInit 1 */
+    DFSDM1_Init++;
   }
 
 }
@@ -153,7 +162,36 @@ void HAL_DFSDM_ChannelMspDeInit(DFSDM_Channel_HandleTypeDef* hdfsdm_channel)
 void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  if(hi2c->Instance==I2C2)
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+  if(hi2c->Instance==I2C1)
+  {
+  /* USER CODE BEGIN I2C1_MspInit 0 */
+  /* USER CODE END I2C1_MspInit 0 */
+  /** Initializes the peripherals clock
+  */
+    PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_I2C1;
+    PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_PCLK1;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+    {
+      //Error_Handler();
+    }
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    /**I2C1 GPIO Configuration
+    PB8     ------> I2C1_SCL
+    PB9     ------> I2C1_SDA
+    */
+    GPIO_InitStruct.Pin = ARD_D15_Pin|ARD_D14_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    /* Peripheral clock enable */
+    __HAL_RCC_I2C1_CLK_ENABLE();
+  /* USER CODE BEGIN I2C1_MspInit 1 */
+  /* USER CODE END I2C1_MspInit 1 */
+  }
+  else if(hi2c->Instance==I2C2)
   {
   /* USER CODE BEGIN I2C2_MspInit 0 */
 
@@ -173,9 +211,7 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c)
 
     /* Peripheral clock enable */
     __HAL_RCC_I2C2_CLK_ENABLE();
-  /* USER CODE BEGIN I2C2_MspInit 1 */
 
-  /* USER CODE END I2C2_MspInit 1 */
   }
 
 }
@@ -188,7 +224,23 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* hi2c)
 */
 void HAL_I2C_MspDeInit(I2C_HandleTypeDef* hi2c)
 {
-  if(hi2c->Instance==I2C2)
+	if(hi2c->Instance==I2C1)
+	  {
+	  /* USER CODE BEGIN I2C1_MspDeInit 0 */
+	  /* USER CODE END I2C1_MspDeInit 0 */
+	    /* Peripheral clock disable */
+	    __HAL_RCC_I2C1_CLK_DISABLE();
+	    /**I2C1 GPIO Configuration
+	    PB8     ------> I2C1_SCL
+	    PB9     ------> I2C1_SDA
+	    */
+	    HAL_GPIO_DeInit(ARD_D15_GPIO_Port, ARD_D15_Pin);
+	    HAL_GPIO_DeInit(ARD_D14_GPIO_Port, ARD_D14_Pin);
+	  /* USER CODE BEGIN I2C1_MspDeInit 1 */
+	  /* USER CODE END I2C1_MspDeInit 1 */
+	  }
+
+	else if(hi2c->Instance==I2C2)
   {
   /* USER CODE BEGIN I2C2_MspDeInit 0 */
 
@@ -200,7 +252,8 @@ void HAL_I2C_MspDeInit(I2C_HandleTypeDef* hi2c)
     PB10     ------> I2C2_SCL
     PB11     ------> I2C2_SDA 
     */
-    HAL_GPIO_DeInit(GPIOB, INTERNAL_I2C2_SCL_Pin|INTERNAL_I2C2_SDA_Pin);
+    HAL_GPIO_DeInit(INTERNAL_I2C2_SCL_GPIO_Port, INTERNAL_I2C2_SCL_Pin);
+    HAL_GPIO_DeInit(INTERNAL_I2C2_SDA_GPIO_Port, INTERNAL_I2C2_SDA_Pin);
 
   /* USER CODE BEGIN I2C2_MspDeInit 1 */
 

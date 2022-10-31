@@ -14,6 +14,7 @@
 #include "../../Drivers/BSP/B-L475E-IOT01/stm32l475e_iot01_hsensor.h"
 #include "../../Drivers/BSP/B-L475E-IOT01/stm32l475e_iot01_gyro.h"
 #include "../../Drivers/BSP/B-L475E-IOT01/stm32l475e_iot01.h"
+#include "ht16k33.h"
 
 #include "stdio.h"
 #include "stdarg.h"
@@ -27,12 +28,16 @@
 
 extern void initialise_monitor_handles(void);	// for semi-hosting support (printf)
 static void MX_GPIO_Init(void);
+static void MX_I2C1_Init(void);
+
 
 int check_button(void);
 void SystemClock_Config(void);
 void change_mode(void);
 void led_handler(uint8_t mode, uint8_t warning);
 void uart_print(const char* format, ...);
+
+I2C_HandleTypeDef hi2c1;
 uint8_t violations_count(uint8_t arr[], uint8_t *warning, uint8_t mode);
 
 uint32_t t1 = 0, t2 = 0;
@@ -87,11 +92,14 @@ int main(void)
 	BSP_HSENSOR_Init(); //ODR: 1Hz
 	BSP_PSENSOR_Init(); //ODR: 25Hz
 
+	MX_I2C1_Init(); // Initialise I2C
+
 	uint32_t imu_tick = HAL_GetTick();
 	uint32_t tnh_tick = HAL_GetTick();
 	uint32_t pressure_tick = HAL_GetTick();;
 	uint32_t sensor_send_tick = HAL_GetTick();
 	uint32_t fire_tick = HAL_GetTick();
+	uint32_t light_tick;
 
 	float temp_data, humidity_data, pressure_data;
 	float accel_data[3], mag_data[3], gyro_data[3]; // [x, y, z]
@@ -109,8 +117,9 @@ int main(void)
 
 	uint8_t mode = 0; //0: exploration, 1: battle
 	uint8_t warning = 0; //0: no warning, 1: warning
-	uint8_t charge_cnt = 0;
-
+	uint8_t charge_cnt = 0; // number of battery
+	uint8_t fired = 0; // counter for LED
+	
 	uart_print("Entering EXPLORATION mode\n"); //initial printing
 
 	while (1)
@@ -253,14 +262,32 @@ int main(void)
 			}
 		}
 
-		// Battle mode will still fire in SOS state
-		if (mode && HAL_GetTick() - fire_tick >= 5000) {
+		// Fire in battle mode
+		if (mode && HAL_GetTick() - fire_tick >= 5000 && !warning) {
 			if (charge_cnt < 2) uart_print("NO BATTERY TO FIRE, PLEASE RECHARGE\n");
 			else {
+				led_displayOn(); // turn on matrix
+				light_tick = HAL_GetTick();
+				fired += 1;
 				charge_cnt -= 2;
 				uart_print("Fluxer Fired! Current Battery Level: %d/10\n",charge_cnt);
 			}
 			fire_tick = HAL_GetTick();
+		}
+
+		// turn of led matrix to simulate blinking
+		if (fired > 0 && HAL_GetTick() - light_tick > 300 && fired%2 == 1){
+			led_displayOff();
+			light_tick = HAL_GetTick();
+			fired += 1;
+			if (fired > 3) fired = 0; // stop blinking
+		}
+
+		// turn on led again to simulate blinking
+		if (fired > 0 && HAL_GetTick() - light_tick > 300 && fired%2 == 0){
+			led_displayOn();
+			light_tick = HAL_GetTick();
+			fired += 1;
 		}
 
 		// send telemetry if no warning
@@ -368,4 +395,37 @@ void uart_print(const char* format, ...){
 	vsprintf(msg_print, format, args);
 	va_end(args);
 	HAL_UART_Transmit(&huart1, (uint8_t*)msg_print, strlen(msg_print),0xFFFF); //Sending in normal mode
+}
+
+static void MX_I2C1_Init(void)
+{
+
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x10909CEC;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+	  uart_print("Unable to init I2C\n");
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    uart_print("Unable to configure Analogue Filter\n");
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    uart_print("Unable to configure Digital Filter\n");
+  }
+
 }
