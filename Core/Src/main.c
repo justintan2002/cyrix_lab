@@ -2,6 +2,9 @@
   * @file           : main.c
   * @brief          : Main program body
   * (c) EE2028 Teaching Team
+  *
+  * Written by: Tan Chern Lin Justin A0240108W
+  * Written by: Teoh Xu En 			 A0239559L
   ******************************************************************************/
 
 
